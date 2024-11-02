@@ -6,3 +6,7 @@ pandas
 scikit-learn 
 joblib
 gunicorn
+flask_cors
+pickle
+request
+jsonify
