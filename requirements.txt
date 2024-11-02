@@ -5,3 +5,4 @@ Werkzeug
 pandas
 scikit-learn 
 joblib
+gunicorn
