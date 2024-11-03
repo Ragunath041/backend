@@ -4,23 +4,25 @@ import psycopg2
 import pandas as pd
 import pickle
 import numpy as np
+import os  # Import os to access environment variables
+
 app = Flask(__name__)
 CORS(app)
+
+# Connect to the PostgreSQL database using the environment variable
 try:
-    conn = psycopg2.connect(
-        dbname="loan_scope",
-        user="postgres",
-        password="root",
-        host="localhost",
-        port="5432"
-    )
+    DATABASE_URL = os.getenv('postgres:root@localhost:5432/loan_scope')  # Ensure this is set on Render
+    conn = psycopg2.connect(DATABASE_URL)
     print("Database connected successfully.")
 except Exception as e:
     print(f"Database connection error: {e}")
+
 csv_file = 'cibil_data.csv'
 cibil_data = pd.read_csv(csv_file)
+
 with open('cibil_predictor_model.pkl', 'rb') as f:
     model = pickle.load(f)
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -39,12 +41,11 @@ def register():
         conn.rollback()
         print(f"Error during registration: {e}")
         return jsonify({"message": "An error occurred during registration. Please try again."}), 500
+
 @app.route('/get_cibil', methods=['POST'])
 def get_cibil():
-    data = request.get_json()  # Get the JSON data from the request
-    pan_number = data.get('pan')  # Extract the PAN number from the data
-
-    # Now call get_cibil_data without passing pan_number as an argument
+    data = request.get_json()
+    pan_number = data.get('pan')
     cibil_data_result = get_cibil_data(pan_number)
 
     if cibil_data_result:
@@ -56,7 +57,6 @@ def get_cibil():
         return jsonify({"message": "PAN number not found"}), 404
 
 def get_cibil_data(pan_number):
-    # Access the cibil_data dataframe to fetch the user info based on the PAN number
     result = cibil_data[cibil_data['PAN'] == pan_number]
     if not result.empty:
         user_info = result.iloc[0]
@@ -90,7 +90,6 @@ def get_cibil_data(pan_number):
         }
     return None
 
-
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -109,6 +108,7 @@ def login():
     except Exception as e:
         print(f"Error during login: {e}")
         return jsonify({"message": "An error occurred during login. Please try again."}), 500
+
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.get_json()
@@ -128,6 +128,7 @@ def predict():
         len(user_data['loanDetails']['consumerLoans'])  # Number of consumer loans
     ]).reshape(1, -1)
     predicted_score = model.predict(features)[0]
+
     def calculate_initial_drop(user_data):
         drop = 0
         if len(user_data['loanDetails']['goldLoans']) == 0 and len(user_data['loanDetails']['consumerLoans']) == 0 and user_data['loanDetails']['creditCard'] == 'NO':
@@ -145,9 +146,11 @@ def predict():
             else:
                 drop = 25  # Credit card without late payments
         return drop
+
     initial_drop = calculate_initial_drop(user_data)
     predicted_score -= initial_drop
     return jsonify({'predicted_score': int(predicted_score)})
+
 @app.route('/calculate_future_cibil', methods=['POST'])
 def calculate_future_cibil():
     data = request.get_json()
@@ -159,5 +162,6 @@ def calculate_future_cibil():
     future_score_drop = late_payments * 10  # Each late payment drops score
     future_cibil_score = predicted_score + future_score_increase - future_score_drop
     return jsonify({'future_cibil_score': future_cibil_score})
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
