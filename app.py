@@ -4,14 +4,17 @@ import psycopg2
 import pandas as pd
 import pickle
 import numpy as np
-import os  # Import os to access environment variables
+import os
 
 app = Flask(__name__)
 CORS(app)
 
+# Initialize connection variable
+conn = None
+
 # Connect to the PostgreSQL database using the environment variable
 try:
-    DATABASE_URL = os.getenv('postgres:root@localhost:5432/loan_scope')  # Ensure this is set on Render
+    DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:root@localhost:5432/loan_scope')  # Fallback to local DB if env variable is not set
     conn = psycopg2.connect(DATABASE_URL)
     print("Database connected successfully.")
 except Exception as e:
@@ -96,6 +99,8 @@ def login():
     username = data.get('username')
     password = data.get('password')
     try:
+        if conn is None:
+            return jsonify({"message": "Database connection not established."}), 500
         with conn.cursor() as cursor:
             cursor.execute(""" 
                 SELECT * FROM users WHERE username = %s AND password = %s;
@@ -114,7 +119,7 @@ def predict():
     data = request.get_json()
     loan_amount = data.get('loan_amount')
     loan_duration = data.get('loan_duration')
-    pan_number = data.get('pan')  # Get PAN number from request
+    pan_number = data.get('pan')
     user_data = get_cibil_data(pan_number)
     if not user_data:
         return jsonify({"message": "PAN number not found"}), 404
@@ -124,27 +129,27 @@ def predict():
         1 if user_data['loanDetails']['creditCard'] == 'YES' else 0,
         1 if user_data['loanDetails']['latePayments'] == 'YES' else 0,
         1 if user_data['loanDetails']['personalLoan'] else 0,
-        len(user_data['loanDetails']['goldLoans']),  # Number of gold loans
-        len(user_data['loanDetails']['consumerLoans'])  # Number of consumer loans
+        len(user_data['loanDetails']['goldLoans']),
+        len(user_data['loanDetails']['consumerLoans'])
     ]).reshape(1, -1)
     predicted_score = model.predict(features)[0]
 
     def calculate_initial_drop(user_data):
         drop = 0
         if len(user_data['loanDetails']['goldLoans']) == 0 and len(user_data['loanDetails']['consumerLoans']) == 0 and user_data['loanDetails']['creditCard'] == 'NO':
-            drop = 20  # No loans, no credit cards, no late payments
+            drop = 20
         elif user_data['loanDetails']['latePayments'] == 'YES':
-            drop = 40  # Late payments present
+            drop = 40
         elif len(user_data['loanDetails']['goldLoans']) > 0 or len(user_data['loanDetails']['consumerLoans']) > 0:
             if user_data['loanDetails']['latePayments'] == 'NO':
-                drop = 30  # Loans without late payments
+                drop = 30
             else:
-                drop = 35  # Loans with late payments
+                drop = 35
         elif user_data['loanDetails']['creditCard'] == 'YES':
             if user_data['loanDetails']['latePayments'] == 'YES':
-                drop = 35  # Credit card with late payments
+                drop = 35
             else:
-                drop = 25  # Credit card without late payments
+                drop = 25
         return drop
 
     initial_drop = calculate_initial_drop(user_data)
@@ -158,8 +163,8 @@ def calculate_future_cibil():
     interest_rate = data.get('interest_rate')
     months_paid_correctly = data.get('months_paid_correctly')
     late_payments = data.get('late_payments')
-    future_score_increase = months_paid_correctly * 5  # Each correct payment increases score
-    future_score_drop = late_payments * 10  # Each late payment drops score
+    future_score_increase = months_paid_correctly * 5
+    future_score_drop = late_payments * 10
     future_cibil_score = predicted_score + future_score_increase - future_score_drop
     return jsonify({'future_cibil_score': future_cibil_score})
 
